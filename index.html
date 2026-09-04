@@ -284,3 +284,155 @@
   </script>
 </body>
 </html>
+      const w = Math.min(canvas.width - x, diameter);
+      const h = Math.min(canvas.height - y, diameter);
+
+      if (w <= 0 || h <= 0) return;
+
+      const imgData = ctx.getImageData(x, y, w, h);
+      const src = imgData.data;
+      const copy = new Uint8ClampedArray(src);
+      const r2 = radius * radius;
+
+      for (let j = 0; j < h; j++) {
+        for (let i = 0; i < w; i++) {
+          const dx = (x + i) - cx;
+          const dy = (y + j) - cy;
+          const d2 = dx * dx + dy * dy;
+
+          if (d2 < r2) {
+            const distortion = Math.pow(Math.sqrt(d2) / radius, factor);
+            const srcX = Math.round(cx + dx * distortion);
+            const srcY = Math.round(cy + dy * distortion);
+
+            const localSrcX = srcX - x;
+            const localSrcY = srcY - y;
+
+            if (localSrcX >= 0 && localSrcX < w && localSrcY >= 0 && localSrcY < h) {
+              const targetIdx = (j * w + i) * 4;
+              const sourceIdx = (localSrcY * w + localSrcX) * 4;
+              src[targetIdx] = copy[sourceIdx];
+              src[targetIdx + 1] = copy[sourceIdx + 1];
+              src[targetIdx + 2] = copy[sourceIdx + 2];
+            }
+          }
+        }
+      }
+      ctx.putImageData(imgData, x, y);
+    }
+
+    // معالجة كل إطار صادر من الكاميرا ومطابقة نقاط الوجه
+    function onResults(results) {
+      loading.classList.add('hidden');
+
+      // حساب عدد الإطارات في الثانية (FPS)
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFrameTime >= 1000) {
+        fpsCounter.innerText = frameCount + " FPS";
+        frameCount = 0;
+        lastFrameTime = now;
+      }
+
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+        const lm = results.multiFaceLandmarks[0];
+
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // استخراج الإحداثيات الحسابية لمناطق الوجه
+        const leftEye = { x: lm[468] ? lm[468].x * w : lm[159].x * w, y: lm[159].y * h };
+        const rightEye = { x: lm[473] ? lm[473].x * w : lm[386].x * w, y: lm[386].y * h };
+        const nose = { x: lm[1].x * w, y: lm[1].y * h };
+        const leftJaw = { x: lm[234].x * w, y: lm[234].y * h };
+        const rightJaw = { x: lm[454].x * w, y: lm[454].y * h };
+
+        // 1. تشويه العينين (تكبير / توسيع بؤبؤ العين)
+        const eyeFactor = 1.0 - (eyeSlider.value / 150.0);
+        warpPoint(ctx, leftEye.x, leftEye.y, 42, eyeFactor);
+        warpPoint(ctx, rightEye.x, rightEye.y, 42, eyeFactor);
+
+        // 2. تصغير ونحت الأنف
+        const noseFactor = 1.0 + (noseSlider.value / 120.0);
+        warpPoint(ctx, nose.x, nose.y, 35, noseFactor);
+
+        // 3. نحت خط الفك
+        const jawFactor = 1.0 + (jawSlider.value / 130.0);
+        warpPoint(ctx, leftJaw.x, leftJaw.y, 55, jawFactor);
+        warpPoint(ctx, rightJaw.x, rightJaw.y, 55, jawFactor);
+
+        // 4. تطبيق تأثير تنعيم البشرة والصبغة اللونية
+        const skinSmooth = skinSlider.value / 100.0;
+        if (skinSmooth > 0.05) {
+          ctx.globalAlpha = skinSmooth * 0.35;
+          ctx.filter = 'blur(4px)';
+          ctx.drawImage(canvas, 0, 0);
+          ctx.filter = 'none';
+          ctx.globalAlpha = 1.0;
+        }
+
+        // 5. تطبيق التأثيرات السينمائية للطابع المختار
+        if (currentArchetype === 'cyberpunk') {
+          ctx.fillStyle = 'rgba(99, 102, 241, 0.15)';
+          ctx.fillRect(0, 0, w, h);
+        } else if (currentArchetype === 'fantasy') {
+          ctx.fillStyle = 'rgba(168, 85, 247, 0.12)';
+          ctx.fillRect(0, 0, w, h);
+        }
+      } else {
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse";
+      }
+      ctx.restore();
+    }
+
+    // تهيئة نموذج الذكاء الاصطناعي والكاميرا
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    faceMesh.onResults(onResults);
+
+    startBtn.addEventListener('click', async () => {
+      startOverlay.classList.add('hidden');
+      loading.classList.remove('hidden');
+
+      try {
+        const camera = new Camera(videoElement, {
+          onFrame: async () => {
+            await faceMesh.send({ image: videoElement });
+          },
+          width: 480,
+          height: 480,
+          facingMode: "user"
+        });
+        await camera.start();
+      } catch (err) {
+        alert("يرجى إعطاء صلاحية الكاميرا للمتصفح لتشغيل الملامح المباشرة.");
+      }
+    });
+
+    // تحديث قيم المؤشرات في الواجهة
+    eyeSlider.oninput = () => document.getElementById('eyeVal').innerText = `+${eyeSlider.value}%`;
+    jawSlider.oninput = () => document.getElementById('jawVal').innerText = `+${jawSlider.value}%`;
+    noseSlider.oninput = () => document.getElementById('noseVal').innerText = `+${noseSlider.value}%`;
+    skinSlider.oninput = () => document.getElementById('skinVal').innerText = `${skinSlider.value}%`;
+
+    document.getElementById('resetBtn').onclick = () => {
+      eyeSlider.value = 0; jawSlider.value = 0; noseSlider.value = 0; skinSlider.value = 0;
+      eyeSlider.oninput(); jawSlider.oninput(); noseSlider.oninput(); skinSlider.oninput();
+    };
+  </script>
+</body>
+</html>
