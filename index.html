@@ -2,104 +2,285 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Face Fusion Studio</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI Live Face Fusion Studio</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- مكتبات MediaPipe لمعالجة الوجه بالذكاء الاصطناعي عبر الكاميرا مباشرة -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
   <style>
-    body { background-color: #09090b; color: #f4f4f5; font-family: system-ui, sans-serif; }
+    body { background-color: #09090b; color: #f4f4f5; font-family: system-ui, sans-serif; touch-action: manipulation; }
     input[type=range] { accent-color: #6366f1; }
+    .mirror { transform: scaleX(-1); }
   </style>
 </head>
-<body class="flex flex-col min-h-screen p-4 max-w-md mx-auto select-none">
+<body class="flex flex-col min-h-screen p-3 max-w-md mx-auto select-none">
 
   <!-- Header -->
-  <header class="flex items-center justify-between pb-4 border-b border-zinc-800 mb-4">
+  <header class="flex items-center justify-between pb-3 border-b border-zinc-800 mb-3">
     <div class="flex items-center gap-2">
-      <div class="w-3 h-3 rounded-full bg-indigo-500 animate-pulse"></div>
-      <h1 class="font-bold text-sm tracking-wide">AI FACE FUSION</h1>
+      <div id="statusDot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></div>
+      <h1 class="font-bold text-xs tracking-wider text-white">LIVE FACE FUSION</h1>
     </div>
-    <span class="text-[10px] bg-indigo-950 text-indigo-400 border border-indigo-800 px-2 py-0.5 rounded-full">جاهز للعمل</span>
+    <span id="fpsCounter" class="text-[10px] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-full">0 FPS</span>
   </header>
 
-  <!-- Live Canvas -->
-  <div class="relative aspect-square w-full rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900 shadow-2xl flex items-center justify-center mb-4">
-    <canvas id="fusionCanvas" width="600" height="600" class="w-full h-full object-cover"></canvas>
-    <div id="emptyMsg" class="absolute text-xs text-zinc-500 text-center pointer-events-none">
-      ارفع صورتك بالأسفل لرؤية الدمج الفوري
-    </div>
-  </div>
+  <!-- الكاميرا وشاشة المعالجة المباشرة -->
+  <div class="relative aspect-square w-full rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-2xl flex items-center justify-center mb-3">
+    <!-- فيديو الكاميرا المخفي للمعالجة -->
+    <video id="webcam" class="hidden" playsinline></video>
+    
+    <!-- لوحة الرسم والمعالجة المباشرة بتقنية التشويه والدمج -->
+    <canvas id="outputCanvas" width="480" height="480" class="w-full h-full object-cover mirror"></canvas>
 
-  <!-- Image Sources -->
-  <div class="grid grid-cols-2 gap-3 mb-5">
-    <div class="flex flex-col gap-1.5">
-      <span class="text-[11px] text-zinc-400 font-medium">1. صورتك الشخصية</span>
-      <label class="flex flex-col items-center justify-center aspect-square rounded-xl border border-dashed border-zinc-700 bg-zinc-900/60 p-2 cursor-pointer active:scale-95 transition">
-        <span class="text-[10px] text-zinc-400 text-center">اضغط لرفع صورة</span>
-        <input type="file" id="userUpload" accept="image/*" class="hidden">
-      </label>
-    </div>
-
-    <div class="flex flex-col gap-1.5">
-      <span class="text-[11px] text-zinc-400 font-medium">2. شخصية الذكاء الاصطناعي</span>
-      <button id="toggleAiBtn" class="flex flex-col items-center justify-center aspect-square rounded-xl border border-zinc-800 bg-zinc-900/60 p-2 active:scale-95 transition">
-        <span class="text-[10px] text-indigo-400 font-medium">تغيير الشخصية الافتراضية</span>
+    <!-- شاشة بدء التشغيل -->
+    <div id="startOverlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-4 text-center z-20">
+      <p class="text-xs text-zinc-300 mb-3 font-medium">يتطلب تفعيل الكاميرا المباشرة ونموذج تتبع ملامح الوجه</p>
+      <button id="startCameraBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-600/30 transition active:scale-95">
+        تشغيل الكاميرا وتحميل الذكاء الاصطناعي
       </button>
     </div>
-  </div>
 
-  <!-- Attribute Sliders -->
-  <div class="flex flex-col gap-3 bg-zinc-900/80 p-4 rounded-xl border border-zinc-800 mb-6">
-    <div class="flex justify-between items-center">
-      <span class="text-xs font-bold text-zinc-200">التحكم في نسبة الدمج</span>
-      <span id="overallVal" class="text-xs font-mono text-indigo-400">50%</span>
-    </div>
-    <input type="range" id="overallSlider" min="0" max="100" value="50" class="w-full h-1.5 bg-zinc-800 rounded-lg cursor-pointer">
-    <div class="flex justify-between text-[10px] text-zinc-500">
-      <span>صورتك (100%)</span>
-      <span>متوازن</span>
-      <span>الشخصية (100%)</span>
+    <!-- مؤشر التحميل -->
+    <div id="loadingIndicator" class="hidden absolute flex flex-col items-center gap-2 z-10">
+      <div class="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+      <span class="text-[11px] text-zinc-400">جاري قراءة المعالم الحركية...</span>
     </div>
   </div>
 
-  <!-- WebGL/Canvas Blend Logic -->
+  <!-- لوحة خيارات وتعديل الملامح في الوقت الفعلي -->
+  <div class="flex flex-col gap-2.5 bg-zinc-900/90 p-3.5 rounded-xl border border-zinc-800 mb-3 text-xs">
+    <div class="flex justify-between items-center mb-1">
+      <span class="font-bold text-zinc-200">التحكم في الملامح الهندسية (Live)</span>
+      <button id="resetBtn" class="text-[10px] text-zinc-400 hover:text-white underline">إعادة ضبط</button>
+    </div>
+
+    <!-- حجم العيون -->
+    <div class="flex flex-col gap-1">
+      <div class="flex justify-between text-[11px] text-zinc-400">
+        <span>تكبير وتوسيع العيون (Eyes Expansion)</span>
+        <span id="eyeVal" class="font-mono text-indigo-400">+0%</span>
+      </div>
+      <input type="range" id="eyeSlider" min="0" max="80" value="25" class="h-1.5 w-full bg-zinc-800 rounded-lg cursor-pointer">
+    </div>
+
+    <!-- نحت الفك وهيكل الوجه -->
+    <div class="flex flex-col gap-1">
+      <div class="flex justify-between text-[11px] text-zinc-400">
+        <span>تنحيف الفك والهيكل (Jawline Contouring)</span>
+        <span id="jawVal" class="font-mono text-indigo-400">0%</span>
+      </div>
+      <input type="range" id="jawSlider" min="0" max="60" value="20" class="h-1.5 w-full bg-zinc-800 rounded-lg cursor-pointer">
+    </div>
+
+    <!-- تعديل الأنف -->
+    <div class="flex flex-col gap-1">
+      <div class="flex justify-between text-[11px] text-zinc-400">
+        <span>نحت وتصغير الأنف (Nose Slimming)</span>
+        <span id="noseVal" class="font-mono text-indigo-400">0%</span>
+      </div>
+      <input type="range" id="noseSlider" min="0" max="60" value="15" class="h-1.5 w-full bg-zinc-800 rounded-lg cursor-pointer">
+    </div>
+
+    <!-- فلتر تنعيم البشرة والجلد -->
+    <div class="flex flex-col gap-1">
+      <div class="flex justify-between text-[11px] text-zinc-400">
+        <span>تنعيم ملمس البشرة (Skin Smoothing)</span>
+        <span id="skinVal" class="font-mono text-indigo-400">30%</span>
+      </div>
+      <input type="range" id="skinSlider" min="0" max="100" value="40" class="h-1.5 w-full bg-zinc-800 rounded-lg cursor-pointer">
+    </div>
+  </div>
+
+  <!-- قوالب الشخصيات الاصطناعية للدمج اللوني والهيكلي -->
+  <div class="flex flex-col gap-1.5 bg-zinc-900/60 p-3 rounded-xl border border-zinc-800">
+    <span class="text-[11px] font-bold text-zinc-300">طابع الشخصية الخيالية (AI Archetype)</span>
+    <div class="grid grid-cols-3 gap-2">
+      <button onclick="setArchetype('cyberpunk')" class="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-indigo-300 border border-indigo-500/20 active:scale-95 transition">Cyberpunk</button>
+      <button onclick="setArchetype('fantasy')" class="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-purple-300 border border-purple-500/20 active:scale-95 transition">Fantasy Elf</button>
+      <button onclick="setArchetype('natural')" class="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 border border-zinc-700 active:scale-95 transition">Natural Glow</button>
+    </div>
+  </div>
+
   <script>
-    const canvas = document.getElementById('fusionCanvas');
-    const ctx = canvas.getContext('2d');
-    const slider = document.getElementById('overallSlider');
-    const valText = document.getElementById('overallVal');
-    const emptyMsg = document.getElementById('emptyMsg');
+    const videoElement = document.getElementById('webcam');
+    const canvas = document.getElementById('outputCanvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const startBtn = document.getElementById('startCameraBtn');
+    const startOverlay = document.getElementById('startOverlay');
+    const loading = document.getElementById('loadingIndicator');
+    const statusDot = document.getElementById('statusDot');
+    const fpsCounter = document.getElementById('fpsCounter');
 
-    let imgA = new Image();
-    let imgB = new Image();
-    imgB.crossOrigin = "anonymous";
-    imgB.src = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&q=80";
+    // أشرطة التحكم
+    const eyeSlider = document.getElementById('eyeSlider');
+    const jawSlider = document.getElementById('jawSlider');
+    const noseSlider = document.getElementById('noseSlider');
+    const skinSlider = document.getElementById('skinSlider');
 
-    function draw() {
-      if (!imgA.src) return;
-      emptyMsg.style.display = 'none';
-      const blend = slider.value / 100;
-      valText.innerText = slider.value + '%';
+    let currentArchetype = 'natural';
+    let lastFrameTime = performance.now();
+    let frameCount = 0;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.globalAlpha = 1.0;
-      ctx.drawImage(imgA, 0, 0, canvas.width, canvas.height);
-
-      // دمج الطبقة الثانية بنعومة لمحاكاة الفيس فيوجن
-      ctx.globalAlpha = blend;
-      ctx.drawImage(imgB, 0, 0, canvas.width, canvas.height);
+    function setArchetype(type) {
+      currentArchetype = type;
     }
 
-    document.getElementById('userUpload').addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        imgA.onload = draw;
-        imgA.src = URL.createObjectURL(file);
+    // دالة التشويه الشعاعي لتكبير أو تصغير أي منطقة بالوجه هندسياً
+    function warpPoint(ctx, cx, cy, radius, factor) {
+      if (radius <= 0 || factor === 0) return;
+      const diameter = radius * 2;
+      const x = Math.max(0, cx - radius);
+      const y = Math.max(0, cy - radius);
+      const w = Math.min(canvas.width - x, diameter);
+      const h = Math.min(canvas.height - y, diameter);
+
+      if (w <= 0 || h <= 0) return;
+
+      const imgData = ctx.getImageData(x, y, w, h);
+      const src = imgData.data;
+      const copy = new Uint8ClampedArray(src);
+      const r2 = radius * radius;
+
+      for (let j = 0; j < h; j++) {
+        for (let i = 0; i < w; i++) {
+          const dx = (x + i) - cx;
+          const dy = (y + j) - cy;
+          const d2 = dx * dx + dy * dy;
+
+          if (d2 < r2) {
+            const distortion = Math.pow(Math.sqrt(d2) / radius, factor);
+            const srcX = Math.round(cx + dx * distortion);
+            const srcY = Math.round(cy + dy * distortion);
+
+            const localSrcX = srcX - x;
+            const localSrcY = srcY - y;
+
+            if (localSrcX >= 0 && localSrcX < w && localSrcY >= 0 && localSrcY < h) {
+              const targetIdx = (j * w + i) * 4;
+              const sourceIdx = (localSrcY * w + localSrcX) * 4;
+              src[targetIdx] = copy[sourceIdx];
+              src[targetIdx + 1] = copy[sourceIdx + 1];
+              src[targetIdx + 2] = copy[sourceIdx + 2];
+            }
+          }
+        }
+      }
+      ctx.putImageData(imgData, x, y);
+    }
+
+    // معالجة كل إطار صادر من الكاميرا ومطابقة نقاط الوجه
+    function onResults(results) {
+      loading.classList.add('hidden');
+
+      // حساب عدد الإطارات في الثانية (FPS)
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFrameTime >= 1000) {
+        fpsCounter.innerText = frameCount + " FPS";
+        frameCount = 0;
+        lastFrameTime = now;
+      }
+
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+        const lm = results.multiFaceLandmarks[0];
+
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // استخراج الإحداثيات الحسابية لمناطق الوجه
+        const leftEye = { x: lm[468] ? lm[468].x * w : lm[159].x * w, y: lm[159].y * h };
+        const rightEye = { x: lm[473] ? lm[473].x * w : lm[386].x * w, y: lm[386].y * h };
+        const nose = { x: lm[1].x * w, y: lm[1].y * h };
+        const leftJaw = { x: lm[234].x * w, y: lm[234].y * h };
+        const rightJaw = { x: lm[454].x * w, y: lm[454].y * h };
+
+        // 1. تشويه العينين (تكبير / توسيع بؤبؤ العين)
+        const eyeFactor = 1.0 - (eyeSlider.value / 150.0);
+        warpPoint(ctx, leftEye.x, leftEye.y, 42, eyeFactor);
+        warpPoint(ctx, rightEye.x, rightEye.y, 42, eyeFactor);
+
+        // 2. تصغير ونحت الأنف
+        const noseFactor = 1.0 + (noseSlider.value / 120.0);
+        warpPoint(ctx, nose.x, nose.y, 35, noseFactor);
+
+        // 3. نحت خط الفك
+        const jawFactor = 1.0 + (jawSlider.value / 130.0);
+        warpPoint(ctx, leftJaw.x, leftJaw.y, 55, jawFactor);
+        warpPoint(ctx, rightJaw.x, rightJaw.y, 55, jawFactor);
+
+        // 4. تطبيق تأثير تنعيم البشرة والصبغة اللونية
+        const skinSmooth = skinSlider.value / 100.0;
+        if (skinSmooth > 0.05) {
+          ctx.globalAlpha = skinSmooth * 0.35;
+          ctx.filter = 'blur(4px)';
+          ctx.drawImage(canvas, 0, 0);
+          ctx.filter = 'none';
+          ctx.globalAlpha = 1.0;
+        }
+
+        // 5. تطبيق التأثيرات السينمائية للطابع المختار
+        if (currentArchetype === 'cyberpunk') {
+          ctx.fillStyle = 'rgba(99, 102, 241, 0.15)';
+          ctx.fillRect(0, 0, w, h);
+        } else if (currentArchetype === 'fantasy') {
+          ctx.fillStyle = 'rgba(168, 85, 247, 0.12)';
+          ctx.fillRect(0, 0, w, h);
+        }
+      } else {
+        statusDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse";
+      }
+      ctx.restore();
+    }
+
+    // تهيئة نموذج الذكاء الاصطناعي والكاميرا
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    faceMesh.onResults(onResults);
+
+    startBtn.addEventListener('click', async () => {
+      startOverlay.classList.add('hidden');
+      loading.classList.remove('hidden');
+
+      try {
+        const camera = new Camera(videoElement, {
+          onFrame: async () => {
+            await faceMesh.send({ image: videoElement });
+          },
+          width: 480,
+          height: 480,
+          facingMode: "user"
+        });
+        await camera.start();
+      } catch (err) {
+        alert("يرجى إعطاء صلاحية الكاميرا للمتصفح لتشغيل الملامح المباشرة.");
       }
     });
 
-    slider.addEventListener('input', draw);
-    imgB.onload = draw;
+    // تحديث قيم المؤشرات في الواجهة
+    eyeSlider.oninput = () => document.getElementById('eyeVal').innerText = `+${eyeSlider.value}%`;
+    jawSlider.oninput = () => document.getElementById('jawVal').innerText = `+${jawSlider.value}%`;
+    noseSlider.oninput = () => document.getElementById('noseVal').innerText = `+${noseSlider.value}%`;
+    skinSlider.oninput = () => document.getElementById('skinVal').innerText = `${skinSlider.value}%`;
+
+    document.getElementById('resetBtn').onclick = () => {
+      eyeSlider.value = 0; jawSlider.value = 0; noseSlider.value = 0; skinSlider.value = 0;
+      eyeSlider.oninput(); jawSlider.oninput(); noseSlider.oninput(); skinSlider.oninput();
+    };
   </script>
 </body>
 </html>
-
