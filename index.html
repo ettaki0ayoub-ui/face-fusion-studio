@@ -3,15 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AI Live Face Fusion Studio</title>
+  <title>Face Fusion Studio Pro</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- مكتبات MediaPipe لمعالجة الوجه بالذكاء الاصطناعي عبر الكاميرا مباشرة -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
   <style>
-    body { background-color: #09090b; color: #f4f4f5; font-family: system-ui, sans-serif; touch-action: manipulation; }
+    body { background: #09090b; color: #f4f4f5; font-family: system-ui, sans-serif; }
     input[type=range] { accent-color: #6366f1; }
-    .mirror { transform: scaleX(-1); }
+    .canvas-flip { transform: scaleX(-1); }
   </style>
 </head>
 <body class="flex flex-col min-h-screen p-3 max-w-md mx-auto select-none">
@@ -20,91 +19,287 @@
   <header class="flex items-center justify-between pb-3 border-b border-zinc-800 mb-3">
     <div class="flex items-center gap-2">
       <div id="statusDot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></div>
-      <h1 class="font-bold text-xs tracking-wider text-white">LIVE FACE FUSION</h1>
+      <h1 class="font-bold text-xs tracking-wider text-white">AI FUSION GPU STUDIO</h1>
     </div>
-    <span id="fpsCounter" class="text-[10px] font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-full">0 FPS</span>
+    <span id="fpsBadge" class="text-[10px] font-mono bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-full text-indigo-400">0 FPS</span>
   </header>
 
-  <!-- الكاميرا وشاشة المعالجة المباشرة -->
-  <div class="relative aspect-square w-full rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-2xl flex items-center justify-center mb-3">
-    <!-- فيديو الكاميرا المخفي للمعالجة -->
+  <!-- WebGL Rendering Viewport -->
+  <div class="relative aspect-[4/5] w-full rounded-2xl overflow-hidden border border-zinc-800 bg-black shadow-2xl flex items-center justify-center mb-3">
     <video id="webcam" class="hidden" playsinline></video>
-    
-    <!-- لوحة الرسم والمعالجة المباشرة بتقنية التشويه والدمج -->
-    <canvas id="outputCanvas" width="480" height="480" class="w-full h-full object-cover mirror"></canvas>
+    <canvas id="glCanvas" width="640" height="800" class="w-full h-full object-cover canvas-flip"></canvas>
 
-    <!-- شاشة بدء التشغيل -->
-    <div id="startOverlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-4 text-center z-20">
-      <p class="text-xs text-zinc-300 mb-3 font-medium">يتطلب تفعيل الكاميرا المباشرة ونموذج تتبع ملامح الوجه</p>
-      <button id="startCameraBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-600/30 transition active:scale-95">
-        تشغيل الكاميرا وتحميل الذكاء الاصطناعي
+    <!-- Start Overlay -->
+    <div id="startCover" class="absolute inset-0 bg-black/85 flex flex-col items-center justify-center p-6 text-center z-20">
+      <div class="w-12 h-12 rounded-full bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center mb-3 text-indigo-400">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+      </div>
+      <h2 class="text-sm font-bold mb-1">تشغيل محرك GPU للوجه</h2>
+      <p class="text-[11px] text-zinc-400 mb-4">معالجة فورية عبر كرت الشاشة بدون تقطيع وبأعلى دقة</p>
+      <button id="initBtn" class="w-full bg-indigo-600 active:scale-95 text-white text-xs font-semibold py-3 rounded-xl shadow-lg transition">
+        بدء الكاميرا والمعالجة العتادية
       </button>
     </div>
+  </div>
 
-    <!-- مؤشر التحميل -->
-    <div id="loadingIndicator" class="hidden absolute flex flex-col items-center gap-2 z-10">
-      <div class="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-      <span class="text-[11px] text-zinc-400">جاري قراءة المعالم الحركية...</span>
+  <!-- Realtime Matrix Controls -->
+  <div class="flex flex-col gap-3 bg-zinc-900/90 p-4 rounded-xl border border-zinc-800 mb-3 text-xs">
+    <div class="flex justify-between items-center">
+      <span class="font-bold text-zinc-200">التحكم في الملامح الهندسية (GPU Morpher)</span>
+      <button id="resetParams" class="text-[10px] text-zinc-400 hover:text-white underline">إعادة ضبط</button>
+    </div>
+
+    <div>
+      <div class="flex justify-between text-[11px] text-zinc-400 mb-1">
+        <span>تكبير العيون (Eyes Morph)</span>
+        <span id="txtEye" class="text-indigo-400 font-mono">25%</span>
+      </div>
+      <input type="range" id="rngEye" min="0" max="60" value="25" class="w-full h-1.5 bg-zinc-800 rounded-lg">
+    </div>
+
+    <div>
+      <div class="flex justify-between text-[11px] text-zinc-400 mb-1">
+        <span>تنحيف الفك والذقن (Jaw Contouring)</span>
+        <span id="txtJaw" class="text-indigo-400 font-mono">20%</span>
+      </div>
+      <input type="range" id="rngJaw" min="0" max="50" value="20" class="w-full h-1.5 bg-zinc-800 rounded-lg">
+    </div>
+
+    <div>
+      <div class="flex justify-between text-[11px] text-zinc-400 mb-1">
+        <span>تنعيم ملمس البشرة (Bilateral Skin Polish)</span>
+        <span id="txtSkin" class="text-indigo-400 font-mono">35%</span>
+      </div>
+      <input type="range" id="rngSkin" min="0" max="100" value="35" class="w-full h-1.5 bg-zinc-800 rounded-lg">
     </div>
   </div>
 
-  <!-- لوحة خيارات وتعديل الملامح في الوقت الفعلي -->
-  <div class="flex flex-col gap-2.5 bg-zinc-900/90 p-3.5 rounded-xl border border-zinc-800 mb-3 text-xs">
-    <div class="flex justify-between items-center mb-1">
-      <span class="font-bold text-zinc-200">التحكم في الملامح الهندسية (Live)</span>
-      <button id="resetBtn" class="text-[10px] text-zinc-400 hover:text-white underline">إعادة ضبط</button>
-    </div>
-
-    <!-- حجم العيون -->
-    <div class="flex flex-col gap-1">
-      <div class="flex justify-between text-[11px] text-zinc-400">
-        <span>تكبير وتوسيع العيون (Eyes Expansion)</span>
-        <span id="eyeVal" class="font-mono text-indigo-400">+0%</span>
-      </div>
-      <input type="range" id="eyeSlider" min="0" max="80" value="25" class="h-1.5 w-full bg-zinc-800 rounded-lg cursor-pointer">
-    </div>
-
-    <!-- نحت الفك وهيكل الوجه -->
-    <div class="flex flex-col gap-1">
-      <div class="flex justify-between text-[11px] text-zinc-400">
-        <span>تنحيف الفك والهيكل (Jawline Contouring)</span>
-        <span id="jawVal" class="font-mono text-indigo-400">0%</span>
-      </div>
-      <input type="range" id="jawSlider" min="0" max="60" value="20" class="h-1.5 w-full bg-zinc-800 rounded-lg cursor-pointer">
-    </div>
-
-    <!-- تعديل الأنف -->
-    <div class="flex flex-col gap-1">
-      <div class="flex justify-between text-[11px] text-zinc-400">
-        <span>نحت وتصغير الأنف (Nose Slimming)</span>
-        <span id="noseVal" class="font-mono text-indigo-400">0%</span>
-      </div>
-      <input type="range" id="noseSlider" min="0" max="60" value="15" class="h-1.5 w-full bg-zinc-800 rounded-lg cursor-pointer">
-    </div>
-
-    <!-- فلتر تنعيم البشرة والجلد -->
-    <div class="flex flex-col gap-1">
-      <div class="flex justify-between text-[11px] text-zinc-400">
-        <span>تنعيم ملمس البشرة (Skin Smoothing)</span>
-        <span id="skinVal" class="font-mono text-indigo-400">30%</span>
-      </div>
-      <input type="range" id="skinSlider" min="0" max="100" value="40" class="h-1.5 w-full bg-zinc-800 rounded-lg cursor-pointer">
-    </div>
-  </div>
-
-  <!-- قوالب الشخصيات الاصطناعية للدمج اللوني والهيكلي -->
+  <!-- Archetype Grading -->
   <div class="flex flex-col gap-1.5 bg-zinc-900/60 p-3 rounded-xl border border-zinc-800">
-    <span class="text-[11px] font-bold text-zinc-300">طابع الشخصية الخيالية (AI Archetype)</span>
+    <span class="text-[11px] font-bold text-zinc-300">طابع الشخصية واللون (Shader Preset)</span>
     <div class="grid grid-cols-3 gap-2">
-      <button onclick="setArchetype('cyberpunk')" class="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-indigo-300 border border-indigo-500/20 active:scale-95 transition">Cyberpunk</button>
-      <button onclick="setArchetype('fantasy')" class="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-purple-300 border border-purple-500/20 active:scale-95 transition">Fantasy Elf</button>
-      <button onclick="setArchetype('natural')" class="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 border border-zinc-700 active:scale-95 transition">Natural Glow</button>
+      <button onclick="setPreset(0)" class="py-2 rounded-lg bg-zinc-800 text-[10px] active:scale-95 border border-zinc-700">طبيعي (Natural)</button>
+      <button onclick="setPreset(1)" class="py-2 rounded-lg bg-zinc-800 text-[10px] text-indigo-300 active:scale-95 border border-indigo-500/30">Cyberpunk</button>
+      <button onclick="setPreset(2)" class="py-2 rounded-lg bg-zinc-800 text-[10px] text-purple-300 active:scale-95 border border-purple-500/30">Cinematic</button>
     </div>
   </div>
 
   <script>
-    const videoElement = document.getElementById('webcam');
-    const canvas = document.getElementById('outputCanvas');
+    // --- WebGL Shaders (معالجة عتادية على بطاقة الرسوميات) ---
+    const vsSource = `
+      attribute vec2 a_position;
+      attribute vec2 a_texCoord;
+      varying vec2 v_texCoord;
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_texCoord = a_texCoord;
+      }
+    `;
+
+    const fsSource = `
+      precision mediump float;
+      varying vec2 v_texCoord;
+      uniform sampler2D u_image;
+      uniform vec2 u_eyeLeft;
+      uniform vec2 u_eyeRight;
+      uniform float u_eyeScale;
+      uniform vec2 u_jawLeft;
+      uniform vec2 u_jawRight;
+      uniform float u_jawScale;
+      uniform float u_smooth;
+      uniform int u_preset;
+
+      vec2 warp(vec2 uv, vec2 center, float radius, float factor) {
+        vec2 diff = uv - center;
+        float d = length(diff);
+        if (d < radius && d > 0.0) {
+          float pct = 1.0 - (d / radius);
+          return center + diff * (1.0 - factor * pct * 0.3);
+        }
+        return uv;
+      }
+
+      void main() {
+        vec2 uv = v_texCoord;
+
+        // تشويه هندسي للعيون والفك على مستوى الـ Fragment
+        if (u_eyeScale > 0.01) {
+          uv = warp(uv, u_eyeLeft, 0.10, u_eyeScale);
+          uv = warp(uv, u_eyeRight, 0.10, u_eyeScale);
+        }
+        if (u_jawScale > 0.01) {
+          uv = warp(uv, u_jawLeft, 0.12, -u_jawScale);
+          uv = warp(uv, u_jawRight, 0.12, -u_jawScale);
+        }
+
+        vec4 col = texture2D(u_image, uv);
+
+        // تنعيم الجلد الذكي (Bilateral Polish)
+        if (u_smooth > 0.05) {
+          vec4 blur = (
+            texture2D(u_image, uv + vec2(0.003, 0.0)) +
+            texture2D(u_image, uv - vec2(0.003, 0.0)) +
+            texture2D(u_image, uv + vec2(0.0, 0.003)) +
+            texture2D(u_image, uv - vec2(0.0, 0.003))
+          ) * 0.25;
+          col = mix(col, blur, u_smooth * 0.5);
+        }
+
+        // قوالب الألوان السينمائية
+        if (u_preset == 1) {
+          col.rgb = mix(col.rgb, vec3(col.r * 0.8, col.g * 1.1, col.b * 1.4), 0.35);
+        } else if (u_preset == 2) {
+          col.rgb = mix(col.rgb, vec3(col.r * 1.3, col.g * 0.9, col.b * 1.2), 0.30);
+        }
+
+        gl_FragColor = col;
+      }
+    `;
+
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: false });
+
+    let program, texture;
+    let uImage, uEyeL, uEyeR, uEyeS, uJawL, uJawR, uJawS, uSmooth, uPreset;
+    let currentPreset = 0;
+    let fpsFrames = 0, lastFpsTime = performance.now();
+
+    function setPreset(p) { currentPreset = p; }
+
+    function compileShader(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    }
+
+    function initGL() {
+      const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+      const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+      program = gl.createProgram();
+      gl.attachShader(program, vs);
+      gl.attachShader(program, fs);
+      gl.linkProgram(program);
+      gl.useProgram(program);
+
+      // رسم مستطيل كامل للشاشة
+      const posBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1,  1, -1, -1,  1,
+        -1,  1,  1, -1,  1,  1
+      ]), gl.STATIC_DRAW);
+
+      const aPos = gl.getAttribLocation(program, "a_position");
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      const texBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, texBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        0, 1,  1, 1,  0, 0,
+        0, 0,  1, 1,  1, 0
+      ]), gl.STATIC_DRAW);
+
+      const aTex = gl.getAttribLocation(program, "a_texCoord");
+      gl.enableVertexAttribArray(aTex);
+      gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
+
+      // ربط المتحولات (Uniforms)
+      uEyeL = gl.getUniformLocation(program, "u_eyeLeft");
+      uEyeR = gl.getUniformLocation(program, "u_eyeRight");
+      uEyeS = gl.getUniformLocation(program, "u_eyeScale");
+      uJawL = gl.getUniformLocation(program, "u_jawLeft");
+      uJawR = gl.getUniformLocation(program, "u_jawRight");
+      uJawS = gl.getUniformLocation(program, "u_jawScale");
+      uSmooth = gl.getUniformLocation(program, "u_smooth");
+      uPreset = gl.getUniformLocation(program, "u_preset");
+
+      // تجهيز مصفوفة التكستشر
+      texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+
+    let faceCoords = { el: [0,0], er: [0,0], jl: [0,0], jr: [0,0], detected: false };
+
+    function onResults(results) {
+      fpsFrames++;
+      const now = performance.now();
+      if (now - lastFpsTime >= 1000) {
+        document.getElementById('fpsBadge').innerText = fpsFrames + " FPS";
+        fpsFrames = 0;
+        lastFpsTime = now;
+      }
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        document.getElementById('statusDot').className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+        const lm = results.multiFaceLandmarks[0];
+        faceCoords.el = [lm[159].x, lm[159].y];
+        faceCoords.er = [lm[386].x, lm[386].y];
+        faceCoords.jl = [lm[234].x, lm[234].y];
+        faceCoords.jr = [lm[454].x, lm[454].y];
+        faceCoords.detected = true;
+      } else {
+        document.getElementById('statusDot').className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse";
+        faceCoords.detected = false;
+      }
+
+      // رفع إطار الفيديو لـ GPU ورسمه
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, results.image);
+
+      gl.uniform2fv(uEyeL, faceCoords.el);
+      gl.uniform2fv(uEyeR, faceCoords.er);
+      gl.uniform1f(uEyeS, faceCoords.detected ? parseFloat(document.getElementById('rngEye').value) / 100.0 : 0.0);
+
+      gl.uniform2fv(uJawL, faceCoords.jl);
+      gl.uniform2fv(uJawR, faceCoords.jr);
+      gl.uniform1f(uJawS, faceCoords.detected ? parseFloat(document.getElementById('rngJaw').value) / 100.0 : 0.0);
+
+      gl.uniform1f(uSmooth, parseFloat(document.getElementById('rngSkin').value) / 100.0);
+      gl.uniform1i(uPreset, currentPreset);
+
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    const faceMesh = new FaceMesh({
+      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+    });
+    faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: false, minDetectionConfidence: 0.5 });
+    faceMesh.onResults(onResults);
+
+    document.getElementById('initBtn').onclick = async () => {
+      document.getElementById('startCover').classList.add('hidden');
+      initGL();
+      const camera = new Camera(video, {
+        onFrame: async () => { await faceMesh.send({ image: video }); },
+        width: 640,
+        height: 800,
+        facingMode: "user"
+      });
+      await camera.start();
+    };
+
+    // تحديث قيم المؤشرات بالواجهة
+    document.getElementById('rngEye').oninput = (e) => document.getElementById('txtEye').innerText = e.target.value + '%';
+    document.getElementById('rngJaw').oninput = (e) => document.getElementById('txtJaw').innerText = e.target.value + '%';
+    document.getElementById('rngSkin').oninput = (e) => document.getElementById('txtSkin').innerText = e.target.value + '%';
+    document.getElementById('resetParams').onclick = () => {
+      document.getElementById('rngEye').value = 0;
+      document.getElementById('rngJaw').value = 0;
+      document.getElementById('rngSkin').value = 0;
+      document.getElementById('rngEye').oninput({target:{value:0}});
+      document.getElementById('rngJaw').oninput({target:{value:0}});
+      document.getElementById('rngSkin').oninput({target:{value:0}});
+    };
+  </script>
+</body>
+</html>
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const startBtn = document.getElementById('startCameraBtn');
     const startOverlay = document.getElementById('startOverlay');
