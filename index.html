@@ -300,6 +300,201 @@
   </script>
 </body>
 </html>
+      uniform float u_jawScale;
+      uniform float u_smooth;
+      uniform int u_preset;
+
+      vec2 warp(vec2 uv, vec2 center, float radius, float factor) {
+        vec2 diff = uv - center;
+        float d = length(diff);
+        if (d < radius && d > 0.0) {
+          float pct = 1.0 - (d / radius);
+          return center + diff * (1.0 - factor * pct * 0.3);
+        }
+        return uv;
+      }
+
+      void main() {
+        vec2 uv = v_texCoord;
+
+        // تشويه هندسي للعيون والفك على مستوى الـ Fragment
+        if (u_eyeScale > 0.01) {
+          uv = warp(uv, u_eyeLeft, 0.10, u_eyeScale);
+          uv = warp(uv, u_eyeRight, 0.10, u_eyeScale);
+        }
+        if (u_jawScale > 0.01) {
+          uv = warp(uv, u_jawLeft, 0.12, -u_jawScale);
+          uv = warp(uv, u_jawRight, 0.12, -u_jawScale);
+        }
+
+        vec4 col = texture2D(u_image, uv);
+
+        // تنعيم الجلد الذكي (Bilateral Polish)
+        if (u_smooth > 0.05) {
+          vec4 blur = (
+            texture2D(u_image, uv + vec2(0.003, 0.0)) +
+            texture2D(u_image, uv - vec2(0.003, 0.0)) +
+            texture2D(u_image, uv + vec2(0.0, 0.003)) +
+            texture2D(u_image, uv - vec2(0.0, 0.003))
+          ) * 0.25;
+          col = mix(col, blur, u_smooth * 0.5);
+        }
+
+        // قوالب الألوان السينمائية
+        if (u_preset == 1) {
+          col.rgb = mix(col.rgb, vec3(col.r * 0.8, col.g * 1.1, col.b * 1.4), 0.35);
+        } else if (u_preset == 2) {
+          col.rgb = mix(col.rgb, vec3(col.r * 1.3, col.g * 0.9, col.b * 1.2), 0.30);
+        }
+
+        gl_FragColor = col;
+      }
+    `;
+
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: false });
+
+    let program, texture;
+    let uImage, uEyeL, uEyeR, uEyeS, uJawL, uJawR, uJawS, uSmooth, uPreset;
+    let currentPreset = 0;
+    let fpsFrames = 0, lastFpsTime = performance.now();
+
+    function setPreset(p) { currentPreset = p; }
+
+    function compileShader(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    }
+
+    function initGL() {
+      const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+      const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+      program = gl.createProgram();
+      gl.attachShader(program, vs);
+      gl.attachShader(program, fs);
+      gl.linkProgram(program);
+      gl.useProgram(program);
+
+      // رسم مستطيل كامل للشاشة
+      const posBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1,  1, -1, -1,  1,
+        -1,  1,  1, -1,  1,  1
+      ]), gl.STATIC_DRAW);
+
+      const aPos = gl.getAttribLocation(program, "a_position");
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      const texBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, texBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        0, 1,  1, 1,  0, 0,
+        0, 0,  1, 1,  1, 0
+      ]), gl.STATIC_DRAW);
+
+      const aTex = gl.getAttribLocation(program, "a_texCoord");
+      gl.enableVertexAttribArray(aTex);
+      gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
+
+      // ربط المتحولات (Uniforms)
+      uEyeL = gl.getUniformLocation(program, "u_eyeLeft");
+      uEyeR = gl.getUniformLocation(program, "u_eyeRight");
+      uEyeS = gl.getUniformLocation(program, "u_eyeScale");
+      uJawL = gl.getUniformLocation(program, "u_jawLeft");
+      uJawR = gl.getUniformLocation(program, "u_jawRight");
+      uJawS = gl.getUniformLocation(program, "u_jawScale");
+      uSmooth = gl.getUniformLocation(program, "u_smooth");
+      uPreset = gl.getUniformLocation(program, "u_preset");
+
+      // تجهيز مصفوفة التكستشر
+      texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+
+    let faceCoords = { el: [0,0], er: [0,0], jl: [0,0], jr: [0,0], detected: false };
+
+    function onResults(results) {
+      fpsFrames++;
+      const now = performance.now();
+      if (now - lastFpsTime >= 1000) {
+        document.getElementById('fpsBadge').innerText = fpsFrames + " FPS";
+        fpsFrames = 0;
+        lastFpsTime = now;
+      }
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        document.getElementById('statusDot').className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+        const lm = results.multiFaceLandmarks[0];
+        faceCoords.el = [lm[159].x, lm[159].y];
+        faceCoords.er = [lm[386].x, lm[386].y];
+        faceCoords.jl = [lm[234].x, lm[234].y];
+        faceCoords.jr = [lm[454].x, lm[454].y];
+        faceCoords.detected = true;
+      } else {
+        document.getElementById('statusDot').className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse";
+        faceCoords.detected = false;
+      }
+
+      // رفع إطار الفيديو لـ GPU ورسمه
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, results.image);
+
+      gl.uniform2fv(uEyeL, faceCoords.el);
+      gl.uniform2fv(uEyeR, faceCoords.er);
+      gl.uniform1f(uEyeS, faceCoords.detected ? parseFloat(document.getElementById('rngEye').value) / 100.0 : 0.0);
+
+      gl.uniform2fv(uJawL, faceCoords.jl);
+      gl.uniform2fv(uJawR, faceCoords.jr);
+      gl.uniform1f(uJawS, faceCoords.detected ? parseFloat(document.getElementById('rngJaw').value) / 100.0 : 0.0);
+
+      gl.uniform1f(uSmooth, parseFloat(document.getElementById('rngSkin').value) / 100.0);
+      gl.uniform1i(uPreset, currentPreset);
+
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    const faceMesh = new FaceMesh({
+      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+    });
+    faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: false, minDetectionConfidence: 0.5 });
+    faceMesh.onResults(onResults);
+
+    document.getElementById('initBtn').onclick = async () => {
+      document.getElementById('startCover').classList.add('hidden');
+      initGL();
+      const camera = new Camera(video, {
+        onFrame: async () => { await faceMesh.send({ image: video }); },
+        width: 640,
+        height: 800,
+        facingMode: "user"
+      });
+      await camera.start();
+    };
+
+    // تحديث قيم المؤشرات بالواجهة
+    document.getElementById('rngEye').oninput = (e) => document.getElementById('txtEye').innerText = e.target.value + '%';
+    document.getElementById('rngJaw').oninput = (e) => document.getElementById('txtJaw').innerText = e.target.value + '%';
+    document.getElementById('rngSkin').oninput = (e) => document.getElementById('txtSkin').innerText = e.target.value + '%';
+    document.getElementById('resetParams').onclick = () => {
+      document.getElementById('rngEye').value = 0;
+      document.getElementById('rngJaw').value = 0;
+      document.getElementById('rngSkin').value = 0;
+      document.getElementById('rngEye').oninput({target:{value:0}});
+      document.getElementById('rngJaw').oninput({target:{value:0}});
+      document.getElementById('rngSkin').oninput({target:{value:0}});
+    };
+  </script>
+</body>
+</html>
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const startBtn = document.getElementById('startCameraBtn');
     const startOverlay = document.getElementById('startOverlay');
