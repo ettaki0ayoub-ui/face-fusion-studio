@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Face Fusion Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #09090b; color: #f4f4f5; font-family: system-ui, sans-serif; }
+    input[type=range] { accent-color: #6366f1; }
+  </style>
+</head>
+<body class="flex flex-col min-h-screen p-4 max-w-md mx-auto select-none">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between pb-4 border-b border-zinc-800 mb-4">
+    <div class="flex items-center gap-2">
+      <div class="w-3 h-3 rounded-full bg-indigo-500 animate-pulse"></div>
+      <h1 class="font-bold text-sm tracking-wide">AI FACE FUSION</h1>
+    </div>
+    <span class="text-[10px] bg-indigo-950 text-indigo-400 border border-indigo-800 px-2 py-0.5 rounded-full">جاهز للعمل</span>
+  </header>
+
+  <!-- Live Canvas -->
+  <div class="relative aspect-square w-full rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900 shadow-2xl flex items-center justify-center mb-4">
+    <canvas id="fusionCanvas" width="600" height="600" class="w-full h-full object-cover"></canvas>
+    <div id="emptyMsg" class="absolute text-xs text-zinc-500 text-center pointer-events-none">
+      ارفع صورتك بالأسفل لرؤية الدمج الفوري
+    </div>
+  </div>
+
+  <!-- Image Sources -->
+  <div class="grid grid-cols-2 gap-3 mb-5">
+    <div class="flex flex-col gap-1.5">
+      <span class="text-[11px] text-zinc-400 font-medium">1. صورتك الشخصية</span>
+      <label class="flex flex-col items-center justify-center aspect-square rounded-xl border border-dashed border-zinc-700 bg-zinc-900/60 p-2 cursor-pointer active:scale-95 transition">
+        <span class="text-[10px] text-zinc-400 text-center">اضغط لرفع صورة</span>
+        <input type="file" id="userUpload" accept="image/*" class="hidden">
+      </label>
+    </div>
+
+    <div class="flex flex-col gap-1.5">
+      <span class="text-[11px] text-zinc-400 font-medium">2. شخصية الذكاء الاصطناعي</span>
+      <button id="toggleAiBtn" class="flex flex-col items-center justify-center aspect-square rounded-xl border border-zinc-800 bg-zinc-900/60 p-2 active:scale-95 transition">
+        <span class="text-[10px] text-indigo-400 font-medium">تغيير الشخصية الافتراضية</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Attribute Sliders -->
+  <div class="flex flex-col gap-3 bg-zinc-900/80 p-4 rounded-xl border border-zinc-800 mb-6">
+    <div class="flex justify-between items-center">
+      <span class="text-xs font-bold text-zinc-200">التحكم في نسبة الدمج</span>
+      <span id="overallVal" class="text-xs font-mono text-indigo-400">50%</span>
+    </div>
+    <input type="range" id="overallSlider" min="0" max="100" value="50" class="w-full h-1.5 bg-zinc-800 rounded-lg cursor-pointer">
+    <div class="flex justify-between text-[10px] text-zinc-500">
+      <span>صورتك (100%)</span>
+      <span>متوازن</span>
+      <span>الشخصية (100%)</span>
+    </div>
+  </div>
+
+  <!-- WebGL/Canvas Blend Logic -->
+  <script>
+    const canvas = document.getElementById('fusionCanvas');
+    const ctx = canvas.getContext('2d');
+    const slider = document.getElementById('overallSlider');
+    const valText = document.getElementById('overallVal');
+    const emptyMsg = document.getElementById('emptyMsg');
+
+    let imgA = new Image();
+    let imgB = new Image();
+    imgB.crossOrigin = "anonymous";
+    imgB.src = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&q=80";
+
+    function draw() {
+      if (!imgA.src) return;
+      emptyMsg.style.display = 'none';
+      const blend = slider.value / 100;
+      valText.innerText = slider.value + '%';
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1.0;
+      ctx.drawImage(imgA, 0, 0, canvas.width, canvas.height);
+
+      // دمج الطبقة الثانية بنعومة لمحاكاة الفيس فيوجن
+      ctx.globalAlpha = blend;
+      ctx.drawImage(imgB, 0, 0, canvas.width, canvas.height);
+    }
+
+    document.getElementById('userUpload').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        imgA.onload = draw;
+        imgA.src = URL.createObjectURL(file);
+      }
+    });
+
+    slider.addEventListener('input', draw);
+    imgB.onload = draw;
+  </script>
+</body>
+</html>
+
